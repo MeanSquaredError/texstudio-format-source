@@ -1,0 +1,355 @@
+%SCRIPT
+
+// Common utility functions
+
+fatal_error = function (message) {
+	throw (message);
+};
+
+// Class ParseNode. Represents one document node. Can be organized either in linear or tree form
+
+ParseNode = function (props) {
+	var i;
+
+	for (i in props) {
+		this [i] = props [i];
+	}
+};
+ParseNode.prototype = {
+	addChild: function (child) {
+		if (('children' in this) == false) {
+			fatal_error ('Cannot add a child to node of type: ' + this.type);
+		}
+		this.children.push (child);
+	}
+};
+ParseNode.typeComment = 1;	// Linear & tree form
+ParseNode.typeEmptyLine = 2;	// Linear & tree form
+ParseNode.typeEnv = 3;		// Tree form only
+ParseNode.typeEnvBegin = 4;	// Linear form only
+ParseNode.typeEnvEnd = 5;	// Linear form only
+ParseNode.typeRoot = 6;		// Tree form only
+ParseNode.typeText = 7;		// Linear & tree form
+ParseNode.createComment = function (text) {
+	return (new ParseNode ({type: ParseNode.typeComment, text: text}));
+};
+ParseNode.createEmptyLine = function () {
+	return (new ParseNode ({type: ParseNode.typeEmptyLine}));
+};
+ParseNode.createEnv = function (textOpen, textClose) {
+	return (new ParseNode ({type: ParseNode.typeEnv, textOpen: textOpen, textClose: textClose, children: []}));
+};
+ParseNode.createEnvBegin = function (envName, text) {
+	return (new ParseNode ({type: ParseNode.typeEnvBegin, envName: envName, text: text}));
+};
+ParseNode.createEnvEnd = function (envName, text) {
+	return (new ParseNode ({type: ParseNode.typeEnvEnd, envName: envName, text: text}));
+};
+ParseNode.createRoot = function () {
+	return (new ParseNode ({type: ParseNode.typeRoot, children: []}));
+};
+ParseNode.createText = function (text) {
+	return (new ParseNode ({type: ParseNode.typeText, text: text}));
+};
+
+// Class ParseTree
+
+function ParseTree (document)
+{
+	this.indentString = ParseTree._priv_getIndentString ();
+	this.eolString = document.lineEndingString ();
+	this._priv_parseDocument (document);
+}
+ParseTree.prototype = {
+	_priv_parseDocument: function (document) {
+		var initial, linearNodes;
+
+		initial = ParseTree._priv_parseTxsTokensAndText (document);
+		linearNodes = ParseTree._priv_parseCombinedLinear (initial.tokens, initial.text);
+		this.root = ParseTree._priv_parseCombinedTree (linearNodes);
+	},
+
+	buildText: function () {
+		return (this._priv_buildNode (this.root, ''));
+	},
+
+	_priv_buildNode: function (node, indentPrefix) {
+		switch (node.type) {
+		case ParseNode.typeComment:
+		case ParseNode.typeText:
+			return (indentPrefix + node.text + this.eolString);
+		case ParseNode.typeEmptyLine:
+			return (this.eolString);
+		case ParseNode.typeEnv:
+			return (
+				indentPrefix + node.textOpen + this.eolString +
+				this._priv_buildChildren (node, this.indentString + indentPrefix) +
+				indentPrefix + node.textClose + this.eolString
+			);
+		case ParseNode.typeRoot:
+			return (this._priv_buildChildren (node, indentPrefix));
+		default:
+			fatal_error ('Unsupported node type');
+		}
+	},
+
+	_priv_buildChildren: function (node, indentPrefix) {
+		var result, i, n;
+
+		result = '';
+		for (i = 0, n = node.children.length; i < n; ++i) {
+			result += this._priv_buildNode (node.children [i], indentPrefix);
+		}
+		return (result);
+	}
+};
+ParseTree._priv_getIndentString = function () {
+	var result, tabStop, i;
+
+	if (ParseTree._priv_getSetting ('Editor/Indent%20with%20Spaces') == 'true') {
+		result = '';
+		tabStop = parseInt (ParseTree._priv_getSetting ('Editor/TabStop'));
+		for (i = 0; i < tabStop; ++i) {
+			result += ' ';
+		}
+	} else {
+		result = "\t";
+	}
+	return (result);
+};
+ParseTree._priv_getSetting = function (name) {
+	var value;
+
+	if ((value = getPersistent (name)) === null) {
+		fatal_error ('Missing setting \'' + name + '\' or access is denied');
+	}
+	return (value);
+
+};
+ParseTree._priv_parseTxsTokensAndText = function (document) {
+	var documentTokens, documentText, lines, lineOffset, i, lineTokens, j, oneLineToken;
+
+	documentTokens = [];
+	documentText = '';
+	lines = document.textLines ();
+	lineOffset = 0;
+	for (i = 0; i < lines.length; ++i) {
+		if ((lineTokens = document.getLineTokens (i)) === false) {
+			fatal_error ('Line ' + i + ' does not have parse information');
+		}
+		for (j = 0; j < lineTokens.length; ++j) {
+			oneLineToken = lineTokens [j];
+			documentTokens.push ({
+				type: oneLineToken.type,
+				subtype: oneLineToken.subtype,
+				level: oneLineToken.level,
+				offset: lineOffset + oneLineToken.startColumn,
+				text: oneLineToken.text
+			});
+		}
+		documentText += lines [i] + '\n';
+		lineOffset += lines [i].length + 1;
+	}
+	return ({tokens: documentTokens, text: documentText});
+};
+ParseTree._priv_parseCombinedLinear = function (txsTokens, text) {
+	var linearNodes, textStart, txsIndex, oneTxsToken;
+
+	linearNodes = [];
+	textStart = 0;
+	txsIndex = 0;
+	while (txsIndex < txsTokens.length) {
+		oneTxsToken = txsTokens [txsIndex];
+		switch (oneTxsToken.type) {
+		case latexTokenType.beginEnv:
+			commandInfo = ParseTree._priv_getCommandInfo (txsTokens, txsIndex);
+			if (textStart < commandInfo.textStart) {
+				ParseTree._priv_parseCombinedText (linearNodes, text.substring (textStart, commandInfo.textStart));
+			}
+			textStart = commandInfo.textEnd;
+			linearNodes.push (ParseNode.createEnvBegin (
+				txsTokens [txsIndex].text,
+				text.substring (commandInfo.textStart, commandInfo.textEnd)
+			))
+			txsIndex = commandInfo.nextTokenIndex;
+			break;
+		case latexTokenType.env:
+			commandInfo = ParseTree._priv_getCommandInfo (txsTokens, txsIndex);
+			if (textStart < commandInfo.textStart) {
+				ParseTree._priv_parseCombinedText (linearNodes, text.substring (textStart, commandInfo.textStart));
+			}
+			textStart = commandInfo.nextText;
+			linearNodes.push (ParseNode.createEnvEnd (
+				txsTokens [txsIndex].text,
+				text.substring (commandInfo.textStart, commandInfo.textEnd)
+			))
+			txsIndex = commandInfo.nextTokenIndex;
+			break;
+		default:
+			++txsIndex;
+			break;
+		}
+	}
+	if (textStart < text.length) {
+		ParseTree._priv_parseCombinedText (linearNodes, text.substring (textStart));
+	}
+	return (linearNodes);
+};
+ParseTree._priv_getCommandInfo = function (txsTokens, indexArg) {
+	var indexFirst, indexLast, textStart, textEnd, i, newStart, newEnd;
+
+	indexFirst = ParseTree._priv_getCommandFirst (txsTokens, indexArg);
+	indexLast = ParseTree._priv_getCommandLast (txsTokens, indexFirst);
+	/*
+		Token ends do not increase monotonically, e.g. \begin{document}
+		is represented by \begin, {document}, document
+		That is why we have to check each token for leftmost/rightmost
+		postition in text.
+	*/
+	textStart = null;
+	textEnd = null;
+	for (i = indexFirst; i <= indexLast; ++i) {
+		newStart = txsTokens [i].offset;
+		newEnd = newStart + txsTokens [i].text.length;
+		if ((textStart === null) || (newStart < textStart)) {
+			textStart = newStart;
+		}
+		if ((textEnd === null) || (newEnd > textEnd)) {
+			textEnd = newEnd;
+		}
+	}
+	return ({
+		textStart: textStart,
+		textEnd: textEnd,
+		nextTokenIndex: indexLast + 1
+	});
+};
+ParseTree._priv_getCommandFirst = function (txsTokens, indexArg) {
+	var argLevel, indexFirst, oneToken;
+
+	argLevel = txsTokens [indexArg].level;
+	for (indexFirst = indexArg - 1;;--indexFirst) {
+		if (indexFirst < 0) {
+			break;
+		}
+		oneToken = txsTokens [indexFirst];
+		if (oneToken.level < argLevel) {
+			if (oneToken.level != argLevel - 1) {
+				break;
+			}
+			if (oneToken.type != latexTokenType.command) {
+				break;
+			}
+			return (indexFirst);
+		}
+	}
+	fatal_error ('Could not find command for argument ' + txsTokens [indexArg].text);
+};
+ParseTree._priv_getCommandLast = function (txsTokens, indexFirst) {
+	var commandLevel, indexLast;
+
+	commandLevel = txsTokens [indexFirst].level;
+	for (indexLast = indexFirst + 1; indexLast < txsTokens.length; ++indexLast) {
+		if (txsTokens [indexLast].level <= commandLevel) {
+			break;
+		}
+	}
+	--indexLast;
+	return (indexLast);
+};
+ParseTree._priv_parseCombinedText = function (linearNodes, text) {
+	var tryCreateText = function (textStart, textEnd) {
+		var output;
+
+		if (textStart == textEnd) {
+			return;
+		}
+		output = text.substring (textStart, textEnd);
+		output = output.replace (/\s+/g, ' ');
+		output = output.trim ();
+		if (output.length == 0) {
+			return;
+		}
+		linearNodes.push (ParseNode.createText (output));
+	};
+
+	/*
+		The TXS tokenizer does not provide the comment tokens (even though it has a comment token type),
+		so we have to detect manually the comments. We also detect the empty lines (TeX paragraphs and
+		turn them into typeEmptyLine nodes.
+	*/
+	offset = 0;
+	rx = /(\n{2,})|%[^\n]*/g;
+	rx.lastIndex = 0;
+	while ((match = rx.exec (text)) !== null) {
+		tryCreateText (offset, match.index);
+		switch (match [0].charAt (0)) {
+		case '\n':
+			linearNodes.push (ParseNode.createEmptyLine ());
+			break;
+		case '%':
+			linearNodes.push (ParseNode.createComment (match [0]));
+			break;
+		default:
+			fatal_error ('Unknown match type');
+		}
+		offset = match.index + match [0].length;
+	}
+	tryCreateText (offset, text.length);
+};
+ParseTree._priv_parseCombinedTree = function (linearNodes) {
+	var root;
+
+	root = ParseNode.createRoot ();
+	ParseTree._priv_parseCombinedTreeChildren (root, linearNodes, 0, linearNodes.length);
+	return (root);
+};
+ParseTree._priv_parseCombinedTreeChildren = function (parent, linearNodes, indexBegin, indexEnd) {
+	var i, j, linearToken, treeToken;
+
+	i = indexBegin;
+	while (i < indexEnd) {
+		linearToken = linearNodes [i];
+		switch (linearToken.type) {
+		case ParseNode.typeEnvBegin:
+			j = ParseTree._priv_parseCombinedTreeFindEnvEnd (linearNodes, i, indexEnd);
+			treeToken = ParseNode.createEnv (linearNodes [i].text, linearNodes [j].text);
+			ParseTree._priv_parseCombinedTreeChildren (treeToken, linearNodes, i+1, j);
+			parent.addChild (treeToken);
+			i = j + 1;
+			break;
+		case ParseNode.typeEnvEnd:
+			fatal_error ('Unexpected environment end');
+		default:
+			parent.addChild (linearToken);
+			++i;
+			break;
+		}
+	}
+};
+ParseTree._priv_parseCombinedTreeFindEnvEnd = function (linearNodes, indexBegin, indexLimit) {
+	var envName, depth, indexEnd, oneNode;
+
+	envName = linearNodes [indexBegin].envName;
+	depth = 1;
+	for (indexEnd = indexBegin + 1; indexEnd < indexLimit; ++indexEnd) {
+		oneNode = linearNodes [indexEnd];
+		if ((oneNode.type == ParseNode.typeEnvBegin) && (oneNode.envName == envName)) {
+			++depth;
+		} else if ((oneNode.type == ParseNode.typeEnvEnd) && (oneNode.envName == envName)) {
+			if (--depth == 0) {
+				return (indexEnd);
+			}
+		}
+	}
+	fatal_error ('Could not find environment end');
+};
+
+// Global code
+
+if (typeof (editor) == 'undefined') {
+	fatal_error ('No open editor');
+}
+tree = new ParseTree (editor.document ());
+newText = tree.buildText ();
+editor.setText (newText);

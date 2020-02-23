@@ -1,0 +1,16 @@
+%SCRIPT
+tokens = editor.document().getLineTokens(1)
+if (tokens === false) {
+	alert ('Tokens NOT FOUND');
+} else {
+	for (i = 0; i < tokens.length; ++i) {
+		oneToken = tokens [i];
+		alert (
+			'Type: ' + oneToken.type + '\n' +
+			'Subtype: ' + oneToken.subtype + '\n' +
+			'Start column: ' + oneToken.startColumn + '\n' +
+			'Level: ' + oneToken.level + '\n' +
+			'Text: ' + oneToken.text
+		);
+	}
+}
