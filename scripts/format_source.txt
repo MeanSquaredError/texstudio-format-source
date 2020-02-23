@@ -178,7 +178,7 @@ ParseTree._priv_parseCombinedLinear = function (txsTokens, text) {
 			if (textStart < commandInfo.textStart) {
 				ParseTree._priv_parseCombinedText (linearNodes, text.substring (textStart, commandInfo.textStart));
 			}
-			textStart = commandInfo.nextText;
+			textStart = commandInfo.textEnd;
 			linearNodes.push (ParseNode.createEnvEnd (
 				txsTokens [txsIndex].text,
 				text.substring (commandInfo.textStart, commandInfo.textEnd)
