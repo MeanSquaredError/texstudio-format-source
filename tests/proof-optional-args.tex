@@ -1,0 +1,10 @@
+% This test shows that when the "amsthm" package is used, the \begin{proof}
+% command marks the next two words as command arguments of the command.
+% The following words are not marked as arguments when the "amsthm" package
+% is not used.
+%
+\documentclass{amsart}
+\usepackage{amsthm}
+\begin{proof}
+abc def ghij klmno pqrst uvwxy zabc
+\end{proof}
