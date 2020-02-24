@@ -132,6 +132,10 @@ ParseTree._priv_parseTxsTokensAndText = function (document) {
 	documentTokens = [];
 	documentText = '';
 	lines = document.textLines ();
+	// When the last line ends with an EOL, TXS adds an extra empty line to the lines array
+	if (lines.length && (lines [lines.length-1] == '')) {
+		lines.pop ();
+	}
 	lineOffset = 0;
 	for (i = 0; i < lines.length; ++i) {
 		if ((lineTokens = document.getLineTokens (i)) === false) {
