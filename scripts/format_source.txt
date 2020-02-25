@@ -23,13 +23,15 @@ ParseNode.prototype = {
 		this.children.push (child);
 	}
 };
-ParseNode.typeComment = 1;	// Linear & tree form
-ParseNode.typeEmptyLine = 2;	// Linear & tree form
-ParseNode.typeEnv = 3;		// Tree form only
-ParseNode.typeEnvBegin = 4;	// Linear form only
-ParseNode.typeEnvEnd = 5;	// Linear form only
-ParseNode.typeRoot = 6;		// Tree form only
-ParseNode.typeText = 7;		// Linear & tree form
+// Each node type can be used in linear form, tree form or both
+ParseNode.typeComment = 1;	// linear, tree
+ParseNode.typeEmptyLine = 2;	// linear, tree
+ParseNode.typeEnv = 3;		// tree
+ParseNode.typeEnvBegin = 4;	// linear
+ParseNode.typeEnvEnd = 5;	// linear
+ParseNode.typeRoot = 6;		// tree
+ParseNode.typeText = 7;		// linear, tree
+ParseNode.typeVerbatim = 8;	// linear, tree
 ParseNode.createComment = function (text) {
 	return (new ParseNode ({type: ParseNode.typeComment, text: text}));
 };
@@ -50,6 +52,9 @@ ParseNode.createRoot = function () {
 };
 ParseNode.createText = function (text) {
 	return (new ParseNode ({type: ParseNode.typeText, text: text}));
+};
+ParseNode.createVerbatim = function (text) {
+	return (new ParseNode ({type: ParseNode.typeVerbatim, text: text}));
 };
 
 // Class ParseTree
@@ -77,6 +82,7 @@ ParseTree.prototype = {
 		switch (node.type) {
 		case ParseNode.typeComment:
 		case ParseNode.typeText:
+		case ParseNode.typeVerbatim:
 			return (indentPrefix + node.text + this.eolString);
 		case ParseNode.typeEmptyLine:
 			return (this.eolString);
@@ -157,7 +163,7 @@ ParseTree._priv_parseTxsTokensAndText = function (document) {
 	return ({tokens: documentTokens, text: documentText});
 };
 ParseTree._priv_parseCombinedLinear = function (txsTokens, text) {
-	var linearNodes, textStart, txsIndex, oneTxsToken;
+	var linearNodes, textStart, txsIndex, oneTxsToken, envName, verbatimEnd;
 
 	linearNodes = [];
 	textStart = 0;
@@ -170,12 +176,22 @@ ParseTree._priv_parseCombinedLinear = function (txsTokens, text) {
 			if (textStart < commandInfo.textStart) {
 				ParseTree._priv_parseCombinedText (linearNodes, text.substring (textStart, commandInfo.textStart));
 			}
-			textStart = commandInfo.textEnd;
-			linearNodes.push (ParseNode.createEnvBegin (
-				txsTokens [txsIndex].text,
-				text.substring (commandInfo.textStart, commandInfo.textEnd)
-			))
-			txsIndex = commandInfo.nextTokenIndex;
+			envName = oneTxsToken.text;
+			if (envName == "verbatim") {
+				verbatimEnd = ParseTree._priv_parseFindVerbatimEnd (txsTokens, txsIndex + 1);
+				linearNodes.push (ParseNode.createVerbatim (
+					text.substring (commandInfo.textStart, verbatimEnd.textEnd)
+				))
+				textStart = verbatimEnd.textEnd;
+				txsIndex = verbatimEnd.nextTokenIndex;
+			} else {
+				textStart = commandInfo.textEnd;
+				linearNodes.push (ParseNode.createEnvBegin (
+					envName,
+					text.substring (commandInfo.textStart, commandInfo.textEnd)
+				))
+				txsIndex = commandInfo.nextTokenIndex;
+			}
 			break;
 		case latexTokenType.env:
 			commandInfo = ParseTree._priv_getCommandInfo (txsTokens, txsIndex);
@@ -198,6 +214,17 @@ ParseTree._priv_parseCombinedLinear = function (txsTokens, text) {
 		ParseTree._priv_parseCombinedText (linearNodes, text.substring (textStart));
 	}
 	return (linearNodes);
+};
+ParseTree._priv_parseFindVerbatimEnd = function (txsTokens, startIndex) {
+	var index, oneTxsToken;
+
+	for (index = startIndex; index < txsTokens.length; ++index) {
+		oneTxsToken = txsTokens [index];
+		if ((oneTxsToken.type == latexTokenType.env) && (oneTxsToken.text == "verbatim")) {
+			return (ParseTree._priv_getCommandInfo (txsTokens, index));
+		}
+	}
+	fatal_error ("Could not find \\end{verbatim}");
 };
 ParseTree._priv_getCommandInfo = function (txsTokens, indexArg) {
 	var indexFirst, indexLast, textStart, textEnd, i, newStart, newEnd;
