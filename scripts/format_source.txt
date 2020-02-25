@@ -1,9 +1,26 @@
 %SCRIPT
 
+// Configuration
+
+config = {
+	// Names of environments that do not indent their children
+	no_indent: []
+};
+
 // Common utility functions
 
 fatal_error = function (message) {
 	throw (message);
+};
+
+configArrayToMap = function (configArray) {
+	var result, i;
+
+	result = {};
+	for (i in configArray) {
+		result [configArray [i]] = null
+	}
+	return (result);
 };
 
 // Class ParseNode. Represents one document node. Can be organized either in linear or tree form
@@ -38,8 +55,14 @@ ParseNode.createComment = function (text) {
 ParseNode.createEmptyLine = function () {
 	return (new ParseNode ({type: ParseNode.typeEmptyLine}));
 };
-ParseNode.createEnv = function (textOpen, textClose) {
-	return (new ParseNode ({type: ParseNode.typeEnv, textOpen: textOpen, textClose: textClose, children: []}));
+ParseNode.createEnv = function (envName, textOpen, textClose) {
+	return (new ParseNode ({
+		type: ParseNode.typeEnv,
+		envName: envName,
+		textOpen: textOpen,
+		textClose: textClose,
+		children: []
+	}));
 };
 ParseNode.createEnvBegin = function (envName, text) {
 	return (new ParseNode ({type: ParseNode.typeEnvBegin, envName: envName, text: text}));
@@ -89,7 +112,14 @@ ParseTree.prototype = {
 		case ParseNode.typeEnv:
 			return (
 				indentPrefix + node.textOpen + this.eolString +
-				this._priv_buildChildren (node, this.indentString + indentPrefix) +
+				this._priv_buildChildren (
+					node,
+					(
+						node.envName in config.no_indent ?
+						indentPrefix :
+						this.indentString + indentPrefix
+					)
+				) +
 				indentPrefix + node.textClose + this.eolString
 			);
 		case ParseNode.typeRoot:
@@ -344,7 +374,7 @@ ParseTree._priv_parseCombinedTreeChildren = function (parent, linearNodes, index
 		switch (linearToken.type) {
 		case ParseNode.typeEnvBegin:
 			j = ParseTree._priv_parseCombinedTreeFindEnvEnd (linearNodes, i, indexEnd);
-			treeToken = ParseNode.createEnv (linearNodes [i].text, linearNodes [j].text);
+			treeToken = ParseNode.createEnv (linearToken.envName, linearToken.text, linearNodes [j].text);
 			ParseTree._priv_parseCombinedTreeChildren (treeToken, linearNodes, i+1, j);
 			parent.addChild (treeToken);
 			i = j + 1;
@@ -378,6 +408,7 @@ ParseTree._priv_parseCombinedTreeFindEnvEnd = function (linearNodes, indexBegin,
 
 // Global code
 
+config.no_indent = configArrayToMap (config.no_indent);
 if (typeof (editor) == 'undefined') {
 	fatal_error ('No open editor');
 }
