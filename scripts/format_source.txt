@@ -4,7 +4,10 @@
 
 config = {
 	// Names of environments that do not indent their children
-	no_indent: []
+	no_indent: [],
+
+	// Names of commands that should be placed on separate lines.
+	separate_line: ['\\documentclass', '\\usepackage']
 };
 
 // Common utility functions
@@ -193,7 +196,7 @@ ParseTree._priv_parseTxsTokensAndText = function (document) {
 	return ({tokens: documentTokens, text: documentText});
 };
 ParseTree._priv_parseCombinedLinear = function (txsTokens, text) {
-	var linearNodes, textStart, txsIndex, oneTxsToken, envName, verbatimEnd;
+	var linearNodes, textStart, txsIndex, oneTxsToken, commandInfo, envName, verbatimEnd;
 
 	linearNodes = [];
 	textStart = 0;
@@ -201,6 +204,19 @@ ParseTree._priv_parseCombinedLinear = function (txsTokens, text) {
 	while (txsIndex < txsTokens.length) {
 		oneTxsToken = txsTokens [txsIndex];
 		switch (oneTxsToken.type) {
+		case latexTokenType.command:
+			if (oneTxsToken.text in config.separate_line) {
+				commandInfo = ParseTree._priv_getCommandInfo (txsTokens, txsIndex);
+				if (textStart < commandInfo.textStart) {
+					ParseTree._priv_parseCombinedText (linearNodes, text.substring (textStart, commandInfo.textStart));
+				}
+				linearNodes.push (ParseNode.createText (text.substring (commandInfo.textStart, commandInfo.textEnd)));
+				textStart = commandInfo.textEnd;
+				txsIndex = commandInfo.nextTokenIndex;
+			} else {
+				++txsIndex;
+			}
+			break;
 		case latexTokenType.beginEnv:
 			commandInfo = ParseTree._priv_getCommandInfo (txsTokens, txsIndex);
 			if (textStart < commandInfo.textStart) {
@@ -256,10 +272,10 @@ ParseTree._priv_parseFindVerbatimEnd = function (txsTokens, startIndex) {
 	}
 	fatal_error ("Could not find \\end{verbatim}");
 };
-ParseTree._priv_getCommandInfo = function (txsTokens, indexArg) {
+ParseTree._priv_getCommandInfo = function (txsTokens, indexInner) {
 	var indexFirst, indexLast, textStart, textEnd, i, newStart, newEnd;
 
-	indexFirst = ParseTree._priv_getCommandFirst (txsTokens, indexArg);
+	indexFirst = ParseTree._priv_getCommandFirst (txsTokens, indexInner);
 	indexLast = ParseTree._priv_getCommandLast (txsTokens, indexFirst);
 	/*
 		Token ends do not increase monotonically, e.g. \begin{document}
@@ -285,26 +301,23 @@ ParseTree._priv_getCommandInfo = function (txsTokens, indexArg) {
 		nextTokenIndex: indexLast + 1
 	});
 };
-ParseTree._priv_getCommandFirst = function (txsTokens, indexArg) {
-	var argLevel, indexFirst, oneToken;
+ParseTree._priv_getCommandFirst = function (txsTokens, indexInner) {
+	var maxLevel, indexCmd, oneToken;
 
-	argLevel = txsTokens [indexArg].level;
-	for (indexFirst = indexArg - 1;;--indexFirst) {
-		if (indexFirst < 0) {
-			break;
+	maxLevel = txsTokens [indexInner].level;
+	for (indexCmd = indexInner; indexCmd >= 0; --indexCmd) {
+		oneToken = txsTokens [indexCmd];
+		if (
+			(oneToken.level <= maxLevel) &&
+			(oneToken.type == latexTokenType.command)
+		) {
+			return (indexCmd);
 		}
-		oneToken = txsTokens [indexFirst];
-		if (oneToken.level < argLevel) {
-			if (oneToken.level != argLevel - 1) {
-				break;
-			}
-			if (oneToken.type != latexTokenType.command) {
-				break;
-			}
-			return (indexFirst);
+		if (maxLevel < oneToken.level) {
+			maxLevel = oneToken.level;
 		}
 	}
-	fatal_error ('Could not find command for argument ' + txsTokens [indexArg].text);
+	fatal_error ('Could not find command for token ' + txsTokens [indexInner].text);
 };
 ParseTree._priv_getCommandLast = function (txsTokens, indexFirst) {
 	var commandLevel, indexLast;
@@ -409,6 +422,7 @@ ParseTree._priv_parseCombinedTreeFindEnvEnd = function (linearNodes, indexBegin,
 // Global code
 
 config.no_indent = configArrayToMap (config.no_indent);
+config.separate_line = configArrayToMap (config.separate_line);
 if (typeof (editor) == 'undefined') {
 	fatal_error ('No open editor');
 }
