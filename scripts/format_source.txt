@@ -4,10 +4,10 @@
 
 config = {
 	// Names of environments that do not indent their children
-	no_indent: [],
+	noIndent: [],
 
 	// Names of commands that should be placed on separate lines.
-	separate_line: ['\\documentclass', '\\usepackage']
+	separateLine: ['\\documentclass', '\\usepackage']
 };
 
 // Common utility functions
@@ -118,7 +118,7 @@ ParseTree.prototype = {
 				this._priv_buildChildren (
 					node,
 					(
-						node.envName in config.no_indent ?
+						node.envName in config.noIndent ?
 						indentPrefix :
 						this.indentString + indentPrefix
 					)
@@ -205,7 +205,7 @@ ParseTree._priv_parseCombinedLinear = function (txsTokens, text) {
 		oneTxsToken = txsTokens [txsIndex];
 		switch (oneTxsToken.type) {
 		case latexTokenType.command:
-			if (oneTxsToken.text in config.separate_line) {
+			if (oneTxsToken.text in config.separateLine) {
 				commandInfo = ParseTree._priv_getCommandInfo (txsTokens, txsIndex);
 				if (textStart < commandInfo.textStart) {
 					ParseTree._priv_parseCombinedText (linearNodes, text.substring (textStart, commandInfo.textStart));
@@ -421,8 +421,8 @@ ParseTree._priv_parseCombinedTreeFindEnvEnd = function (linearNodes, indexBegin,
 
 // Global code
 
-config.no_indent = configArrayToMap (config.no_indent);
-config.separate_line = configArrayToMap (config.separate_line);
+config.noIndent = configArrayToMap (config.noIndent);
+config.separateLine = configArrayToMap (config.separateLine);
 if (typeof (editor) == 'undefined') {
 	fatal_error ('No open editor');
 }
