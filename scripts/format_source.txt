@@ -107,29 +107,99 @@ ParseTree.prototype = {
 	_priv_buildNode: function (node, indentPrefix) {
 		switch (node.type) {
 		case ParseNode.typeComment:
-		case ParseNode.typeText:
 		case ParseNode.typeVerbatim:
-			return (indentPrefix + node.text + this.eolString);
+			return (this._priv_buildNodeVerbatim (node, indentPrefix));
 		case ParseNode.typeEmptyLine:
-			return (this.eolString);
+			return (this._priv_buildNodeEmptyLine ());
 		case ParseNode.typeEnv:
-			return (
-				indentPrefix + node.textOpen + this.eolString +
-				this._priv_buildChildren (
-					node,
-					(
-						node.envName in config.noIndent ?
-						indentPrefix :
-						this.indentString + indentPrefix
-					)
-				) +
-				indentPrefix + node.textClose + this.eolString
-			);
+			return (this._priv_buildNodeEnv (node, indentPrefix));
 		case ParseNode.typeRoot:
-			return (this._priv_buildChildren (node, indentPrefix));
+			return (this._priv_buildNodeRoot (node, indentPrefix));
+		case ParseNode.typeText:
+			return (this._priv_buildNodeText (node, indentPrefix));
 		default:
 			fatal_error ('Unsupported node type');
 		}
+	},
+
+	_priv_buildNodeEmptyLine: function () {
+		return (this.eolString);
+	},
+
+	_priv_buildNodeEnv: function (node, indentPrefix) {
+		return (
+			indentPrefix + node.textOpen + this.eolString +
+			this._priv_buildChildren (
+				node,
+				(
+					node.envName in config.noIndent ?
+					indentPrefix :
+					this.indentString + indentPrefix
+				)
+			) +
+			indentPrefix + node.textClose + this.eolString
+		);
+	},
+
+	_priv_buildNodeRoot: function (node, indentPrefix) {
+		return (this._priv_buildChildren (node, indentPrefix));
+	},
+
+	_priv_buildNodeText: function (node, indentPrefix) {
+		var getLineEnd = function (text, lineStart, maxLength) {
+			var maxPos, lineEnd, ch;
+
+			maxPos = lineStart + maxLength;
+			if (maxPos >= text.length) {
+				return (text.length);
+			}
+			/*
+				Search for a line length that does not exceed the maximum allowed length.
+
+				The following code relies on the fact that text nodes have their leading and
+				trailing whitespace trimmed . Otherwise we could return an empty line string
+				which would cause an endless loop building the lines for the text node.
+			*/
+			for (lineEnd = maxPos; lineEnd > lineStart; --lineEnd) {
+				/*
+					All whitespace inside the text node has been compressed to single
+					space characters so as long as we found a space we know that the preceding
+					character is a non-whitespace character.
+				*/
+				if (text.charAt (lineEnd) == ' ') {
+					return (lineEnd);
+				}
+			}
+			/*
+				It is not possible to get a line length that does not exceed the maximum
+				allowed length. Try to find the minimal line length exceeding the maximum
+				allowed length.
+			*/
+			for (lineEnd = maxPos + 1; lineEnd < text.length; ++lineEnd) {
+				if (text.charAt (lineEnd) == ' ') {
+					return (lineEnd);
+				}
+			}
+			// The text does not contain any whitespace, so return the length of the whole text
+			return (text.length);
+		};
+
+		var lineText, lineStart, lineEnd;
+
+		if (this.hardWrapChars === null) {
+			return (indentPrefix + node.text + this.eolString);
+		}
+		lineText = '';
+		/*
+			All whitespace inside the text node has been compressed to single
+			space characters so after processing each line we just add one to the current
+			position to get the start of the next line
+		*/
+		for (lineStart = 0; lineStart < node.text.length; lineStart = lineEnd + 1) {
+			lineEnd = getLineEnd (node.text, lineStart, this.hardWrapChars);
+			text += indentPrefix + node.text.substring (lineStart, lineEnd) + this.eolString;
+		}
+		return (lineText);
 	},
 
 	_priv_buildChildren: function (node, indentPrefix) {
