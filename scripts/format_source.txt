@@ -87,7 +87,9 @@ ParseNode.createVerbatim = function (text) {
 
 function ParseTree (document)
 {
-	this.indentString = ParseTree._priv_getIndentString ();
+	this.tabNumCols = parseInt (ParseTree._priv_getSetting ('Editor/TabStop'));
+	this.tabString = ParseTree._priv_geTabString (this.tabNumCols);
+	this.hardWrapColumn = ParseTree._priv_getHardWrapColumn ();
 	this.eolString = document.lineEndingString ();
 	this._priv_parseDocument (document);
 }
@@ -101,22 +103,29 @@ ParseTree.prototype = {
 	},
 
 	buildText: function () {
-		return (this._priv_buildNode (this.root, ''));
+		var result;
+
+		this.indentNumPos = 0;
+		this.indentPrefix = '';
+		result = this._priv_buildNode (this.root);
+		this.indentPrefix = null;
+		this.indentNumPos = null;
+		return (result);
 	},
 
-	_priv_buildNode: function (node, indentPrefix) {
+	_priv_buildNode: function (node) {
 		switch (node.type) {
 		case ParseNode.typeComment:
 		case ParseNode.typeVerbatim:
-			return (this._priv_buildNodeVerbatim (node, indentPrefix));
+			return (this._priv_buildNodeVerbatim (node));
 		case ParseNode.typeEmptyLine:
 			return (this._priv_buildNodeEmptyLine ());
 		case ParseNode.typeEnv:
-			return (this._priv_buildNodeEnv (node, indentPrefix));
+			return (this._priv_buildNodeEnv (node));
 		case ParseNode.typeRoot:
-			return (this._priv_buildNodeRoot (node, indentPrefix));
+			return (this._priv_buildNodeRoot (node));
 		case ParseNode.typeText:
-			return (this._priv_buildNodeText (node, indentPrefix));
+			return (this._priv_buildNodeText (node));
 		default:
 			fatal_error ('Unsupported node type');
 		}
@@ -126,26 +135,28 @@ ParseTree.prototype = {
 		return (this.eolString);
 	},
 
-	_priv_buildNodeEnv: function (node, indentPrefix) {
-		return (
-			indentPrefix + node.textOpen + this.eolString +
-			this._priv_buildChildren (
-				node,
-				(
-					node.envName in config.noIndent ?
-					indentPrefix :
-					this.indentString + indentPrefix
-				)
-			) +
-			indentPrefix + node.textClose + this.eolString
-		);
+	_priv_buildNodeEnv: function (node) {
+		var result, oldIndentNumPos, oldIndentPrefix;
+
+		result = this.indentPrefix + node.textOpen + this.eolString;
+		oldIndentNumPos = this.indentNumPos;
+		oldIndentPrefix = this.indentPrefix;
+		if ((node.envName in config.noIndent) == false) {
+			this.indentNumPos += this.tabNumCols;
+			this.indentPrefix += this.tabString;
+		}
+		result += this._priv_buildChildren (node);
+		this.indentNumPos = oldIndentNumPos;
+		this.indentPrefix = oldIndentPrefix;
+		result += this.indentPrefix + node.textClose + this.eolString;
+		return (result);
 	},
 
-	_priv_buildNodeRoot: function (node, indentPrefix) {
-		return (this._priv_buildChildren (node, indentPrefix));
+	_priv_buildNodeRoot: function (node) {
+		return (this._priv_buildChildren (node));
 	},
 
-	_priv_buildNodeText: function (node, indentPrefix) {
+	_priv_buildNodeText: function (node) {
 		var getLineEnd = function (text, lineStart, maxLength) {
 			var maxPos, lineEnd, ch;
 
@@ -184,11 +195,15 @@ ParseTree.prototype = {
 			return (text.length);
 		};
 
-		var lineText, lineStart, lineEnd;
+		var lineMaxLength, lineText, lineStart, lineEnd;
 
-		if (this.hardWrapChars === null) {
-			return (indentPrefix + node.text + this.eolString);
+		if (this.hardWrapColumn === null) {
+			return (this.indentPrefix + node.text + this.eolString);
 		}
+		lineMaxLength =
+			(this.indentNumPos < this.hardWrapColumn) ?
+			(this.hardWrapColumn - this.indentNumPos) :
+			0;
 		lineText = '';
 		/*
 			All whitespace inside the text node has been compressed to single
@@ -196,35 +211,45 @@ ParseTree.prototype = {
 			position to get the start of the next line
 		*/
 		for (lineStart = 0; lineStart < node.text.length; lineStart = lineEnd + 1) {
-			lineEnd = getLineEnd (node.text, lineStart, this.hardWrapChars);
-			text += indentPrefix + node.text.substring (lineStart, lineEnd) + this.eolString;
+			lineEnd = getLineEnd (node.text, lineStart, lineMaxLength);
+			lineText += this.indentPrefix + node.text.substring (lineStart, lineEnd) + this.eolString;
 		}
 		return (lineText);
 	},
 
-	_priv_buildChildren: function (node, indentPrefix) {
+	_priv_buildNodeVerbatim: function (node) {
+		return (this.indentPrefix + node.text + this.eolString);
+	},
+
+	_priv_buildChildren: function (node) {
 		var result, i, n;
 
 		result = '';
 		for (i = 0, n = node.children.length; i < n; ++i) {
-			result += this._priv_buildNode (node.children [i], indentPrefix);
+			result += this._priv_buildNode (node.children [i]);
 		}
 		return (result);
 	}
 };
-ParseTree._priv_getIndentString = function () {
-	var result, tabStop, i;
+ParseTree._priv_geTabString = function (tabNumCols) {
+	var result, i;
 
 	if (ParseTree._priv_getSetting ('Editor/Indent%20with%20Spaces') == 'true') {
 		result = '';
-		tabStop = parseInt (ParseTree._priv_getSetting ('Editor/TabStop'));
-		for (i = 0; i < tabStop; ++i) {
+		for (i = 0; i < tabNumCols; ++i) {
 			result += ' ';
 		}
 	} else {
 		result = "\t";
 	}
 	return (result);
+};
+ParseTree._priv_getHardWrapColumn = function () {
+	return (
+		(ParseTree._priv_getSetting ('Editor/WordWrapMode') === 3) ?
+		ParseTree._priv_getSetting ('Editor/WrapLineWidth') :
+		null
+	);
 };
 ParseTree._priv_getSetting = function (name) {
 	var value;
