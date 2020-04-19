@@ -7,7 +7,16 @@ config = {
 	noIndent: [],
 
 	// Names of commands that should be placed on separate lines.
-	separateLine: ['\\documentclass', '\\usepackage']
+	separateLine: ['\\documentclass', '\\usepackage'],
+
+	// Line number after which hard wrap is performed by insertion of newline character(s).
+	// Can be one of:
+	//	'autodetect': to autodetect the setting based on TeXstudio settings.
+	//	'none': to disable hard line wrapping. This will cause text nodes to be placed on a single line. Useful if TexStudio uses soft line wrapping.
+	//	any positive integer value (e.g. 80): to specify explicitly the line number after which the newline character(s) will be inserted.
+	// Note that this value only affects text content that may be broken along whitespace. In some cases when there is no whitespace in the text content
+	// a line may extend past the specified hard wrap column.
+	hardWrapColumn: 'autodetect'
 };
 
 // Common utility functions
@@ -245,10 +254,24 @@ ParseTree._priv_geTabString = function (tabNumCols) {
 	return (result);
 };
 ParseTree._priv_getHardWrapColumn = function () {
+	if (config.hardWrapColumn === 'autodetect') {
+		return (
+			(ParseTree._priv_getSetting ('Editor/WordWrapMode') === 3) ?
+			ParseTree._priv_getSetting ('Editor/WrapLineWidth') :
+			null
+		);
+	} else if (config.hardWrapColumn === 'none') {
+		return (null);
+	} else if (ParseTree._priv_isInteger (config.hardWrapColumn) && (config.hardWrapColumn > 0)) {
+		return (config.hardWrapColumn);
+	} else {
+		fatal_error ('Bad value of config.hardWrapColumn');
+	}
+};
+ParseTree._priv_isInteger = function (value) {
 	return (
-		(ParseTree._priv_getSetting ('Editor/WordWrapMode') === 3) ?
-		ParseTree._priv_getSetting ('Editor/WrapLineWidth') :
-		null
+		(isNaN (value) == false) &&
+		(parseInt (value) === value)
 	);
 };
 ParseTree._priv_getSetting = function (name) {
